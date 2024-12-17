@@ -1,9 +1,10 @@
 from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse,StreamingResponse
 import cv2
 import numpy as np
 from fastapi.middleware.cors import CORSMiddleware
 import base64
+from threading import Lock
 
 app = FastAPI()
 
@@ -66,7 +67,8 @@ async def upload_frame(file: UploadFile = File(...), threshold_factor: int = 25,
         thresh_image = thresh
 
     # Update the previous frame for the next comparison
-    previous_frame = frame_gray
+    with frame_lock:
+        previous_frame = frame_gray
 
     if processed_frame is not None and thresh_image is not None:
         _, processed_frame_encoded = cv2.imencode('.jpg', processed_frame)
@@ -81,6 +83,34 @@ async def upload_frame(file: UploadFile = File(...), threshold_factor: int = 25,
 
     return {"message": "Frame received and processed successfully."}
 
-@app.get("/get_previous_frame/")
-def get_previous_frame():
-    return previous_frame
+
+frame_lock = Lock() 
+# Fallback static image (replace with your static file path or a default image array)
+fallback_image = cv2.imread("img/0.jpg")  # Make sure to place fallback.jpg in the same directory
+
+
+def generate_stream():
+    """
+    A generator function to stream the latest frame.
+    If the global frame is None, it streams the fallback image.
+    """
+    while True:
+        with frame_lock:  # Ensure safe access to the previous_frame
+            current_frame = previous_frame if previous_frame is not None else fallback_image
+
+        # Encode the frame as JPEG
+        _, buffer = cv2.imencode('.jpg', current_frame)
+        
+        # Yield the frame in MJPEG format
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+
+
+@app.get("/video")
+def video_feed():
+    """
+    Endpoint to stream the video feed.
+    If no POST request updates the frame, it will stream the fallback image.
+    """
+    return StreamingResponse(generate_stream(), media_type="multipart/x-mixed-replace; boundary=frame")
+
