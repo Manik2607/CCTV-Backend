@@ -19,9 +19,9 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-
+count = 0
 @app.post("/upload_frame/")
-async def upload_frame(file: UploadFile = File(...)):
+async def upload_frame(file: UploadFile = File(...), threshold_factor: int = 25, motion_factor: int = 1000 ):
     global previous_frame
 
     # Read the uploaded file
@@ -44,7 +44,7 @@ async def upload_frame(file: UploadFile = File(...)):
         frame_diff = cv2.absdiff(previous_frame, frame_gray)
 
         # Threshold the difference to detect motion
-        _, thresh = cv2.threshold(frame_diff, 25, 255, cv2.THRESH_BINARY)
+        _, thresh = cv2.threshold(frame_diff, threshold_factor, 255, cv2.THRESH_BINARY)
 
         # Dilate the threshold image to fill in holes
         dilated = cv2.dilate(thresh, None, iterations=2)
@@ -53,13 +53,14 @@ async def upload_frame(file: UploadFile = File(...)):
         contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         for contour in contours:
-            if cv2.contourArea(contour) < 1000:
+            if cv2.contourArea(contour) < motion_factor:
                 # Ignore small contours
                 continue
 
             # Get the bounding box for the contour
             (x, y, w, h) = cv2.boundingRect(contour)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.imwrite("img/"+str(count)+".jpg",frame)
 
         processed_frame = frame
         thresh_image = thresh
